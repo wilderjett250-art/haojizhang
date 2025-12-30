@@ -19,6 +19,16 @@ interface CategoryDao {
     @Query("SELECT COUNT(*) FROM category")
     suspend fun countAll(): Int
 
+
+    @Query("SELECT * FROM category ORDER BY type ASC, sortOrder ASC, id ASC")
+    suspend fun getAllForExport(): List<CategoryEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(list: List<CategoryEntity>): List<Long>
+
+    @Query("DELETE FROM category")
+    suspend fun deleteAll()
+
     @Query(
         """
         SELECT * FROM category

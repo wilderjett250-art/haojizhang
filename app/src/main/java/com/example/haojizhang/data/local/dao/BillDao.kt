@@ -40,6 +40,19 @@ interface BillDao {
     fun observeSumByType(type: Int, startMillis: Long, endMillis: Long): Flow<Long>
 
     /** 分类汇总：返回 categoryId + sum */
+
+
+    @Query("SELECT * FROM bill ORDER BY occurredAt DESC")
+    suspend fun getAllForExport(): List<BillEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAllForImport(list: List<BillEntity>): List<Long>
+
+    @Query("DELETE FROM bill")
+    suspend fun deleteAll()
+
+
+
     @Query("""
         SELECT categoryId AS keyId, COALESCE(SUM(amountCent), 0) AS totalCent
         FROM bill

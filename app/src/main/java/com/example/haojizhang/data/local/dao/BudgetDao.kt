@@ -6,6 +6,11 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface BudgetDao {
+    @Query("SELECT * FROM budget ORDER BY yearMonth DESC")
+    suspend fun getAllForExport(): List<BudgetEntity>
+
+    @Query("DELETE FROM budget")
+    suspend fun deleteAll()
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(entity: BudgetEntity): Long

@@ -19,6 +19,18 @@ interface AccountDao {
     @Query("SELECT COUNT(*) FROM account")
     suspend fun countAll(): Int
 
+    @Query("SELECT * FROM account ORDER BY sortOrder ASC, id ASC")
+    suspend fun getAllForExport(): List<AccountEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(list: List<AccountEntity>): List<Long>
+
+    @Query("DELETE FROM account")
+    suspend fun deleteAll()
+
+
+
+
     @Query(
         """
         SELECT * FROM account

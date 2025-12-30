@@ -12,8 +12,17 @@ import com.example.haojizhang.data.local.dao.CategoryAggRow
 import com.example.haojizhang.data.local.db.DbProvider
 import com.example.haojizhang.data.local.db.HaoJizhangDatabase
 import com.example.haojizhang.data.util.DateUtils
+import com.example.haojizhang.data.util.Prefs
 import kotlinx.coroutines.flow.firstOrNull
 import java.util.Calendar
+import kotlin.math.roundToInt
+
+// ✅ 不要 private（否则别的地方/同文件的引用会乱）
+data class SpendingAnalysis(
+    val title: String,
+    val detail: String,
+    val suggestions: List<String>
+)
 
 @Composable
 fun InsightsScreen() {
@@ -21,9 +30,13 @@ fun InsightsScreen() {
     val db = remember { DbProvider.get(context) }
 
     val (startMillis, endMillis) = remember { currentMonthRangeMillis() }
-    val yearMonth = remember { DateUtils.currentYearMonth() } // ✅ 只保留这一处
+    val yearMonth = remember { DateUtils.currentYearMonth() }
 
-    // 本月收支（分）
+    // ✅ 从“我的-预算规则”读取阈值（百分比 -> 小数）
+    val warnHigh = remember { Prefs.getWarnHigh(context) }       // 0.85
+    val warnLow = remember { Prefs.getWarnLow(context) }         // 0.40
+    val topShareWarn = remember { Prefs.getTopShare(context) }   // 0.60
+
     val expenseCent by db.billDao()
         .observeSumByType(0, startMillis, endMillis)
         .collectAsState(initial = 0L)
@@ -32,28 +45,35 @@ fun InsightsScreen() {
         .observeSumByType(1, startMillis, endMillis)
         .collectAsState(initial = 0L)
 
-    // 支出分类聚合：categoryId + totalCent
     val catAgg by db.billDao()
         .observeCategoryAgg(0, startMillis, endMillis)
         .collectAsState(initial = emptyList())
 
-    // 分类列表（支出类型：0）
     val categories by db.categoryDao()
         .observeVisibleByType(0)
         .collectAsState(initial = emptyList())
 
-    // id -> name 映射
     val catNameMap = remember(categories) { categories.associateBy({ it.id }, { it.name }) }
 
     val top5 = remember(catAgg) { catAgg.take(5) }
-    val totalExpense = expenseCent
     val maxTop = remember(top5) { top5.maxOfOrNull { it.totalCent } ?: 0L }
 
-    // 本月预算（可选）
     val budget by db.budgetDao().observeByMonth(yearMonth).collectAsState(initial = null)
-
-    // 最近3个月平均支出（可选：用来判断偏高/偏低）
     val avg3MonthExpenseCent by rememberAvgExpenseLast3Months(db)
+
+    // ✅ 这里一定返回 SpendingAnalysis，下面才能 analysis.title/detail/suggestions
+    val analysis = remember(expenseCent, incomeCent, budget, avg3MonthExpenseCent, catAgg, warnHigh, warnLow, topShareWarn) {
+        analyzeSpendingLocal(
+            monthExpenseCent = expenseCent,
+            monthIncomeCent = incomeCent,
+            budgetCent = budget?.limitCent,
+            avg3MonthExpenseCent = avg3MonthExpenseCent,
+            topCategoryShare = topCategoryShare(catAgg, expenseCent),
+            warnHigh = warnHigh,
+            warnLow = warnLow,
+            topShareWarn = topShareWarn
+        )
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(16.dp),
@@ -61,36 +81,31 @@ fun InsightsScreen() {
     ) {
         item { Text("洞察", style = MaterialTheme.typography.titleLarge) }
 
-        // ✅ 自动分析
         item {
-            val analysis = analyzeSpendingLocal(
-                monthExpenseCent = expenseCent,
-                monthIncomeCent = incomeCent,
-                budgetCent = budget?.limitCent,
-                avg3MonthExpenseCent = avg3MonthExpenseCent,
-                topCategoryShare = topCategoryShare(catAgg, expenseCent)
-            )
-
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
                     Text("自动分析", style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(10.dp))
-                    Text(analysis.title, style = MaterialTheme.typography.titleLarge)
+
+                    // ✅ 这里必须是 String，歧义就没了
+                    Text(text = analysis.title, style = MaterialTheme.typography.titleLarge)
                     Spacer(Modifier.height(6.dp))
-                    Text(analysis.detail, style = MaterialTheme.typography.bodyMedium)
+                    Text(text = analysis.detail, style = MaterialTheme.typography.bodyMedium)
 
                     Spacer(Modifier.height(10.dp))
-                    analysis.suggestions.forEach { s -> Text("• $s") }
+                    analysis.suggestions.forEach { s: String ->
+                        Text(text = "• $s")
+                    }
                 }
             }
         }
 
-        // ✅ 本月概览
         item {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
                     Text("本月概览（$yearMonth）", style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(12.dp))
+
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("本月支出")
                         Text("¥${centToYuanText(expenseCent)}")
@@ -111,7 +126,6 @@ fun InsightsScreen() {
             }
         }
 
-        // ✅ Top5
         item {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
@@ -127,6 +141,7 @@ fun InsightsScreen() {
         } else {
             items(top5) { row ->
                 val name = catNameMap[row.keyId] ?: "未知分类(${row.keyId})"
+                val totalExpense = expenseCent
                 val percent = if (totalExpense <= 0) 0 else ((row.totalCent * 100) / totalExpense).toInt()
                 val progress = if (maxTop <= 0) 0f else row.totalCent.toFloat() / maxTop.toFloat()
 
@@ -147,7 +162,6 @@ fun InsightsScreen() {
     }
 }
 
-/** 本月 [startMillis, endMillis]（包含本月最后一毫秒） */
 private fun currentMonthRangeMillis(): Pair<Long, Long> {
     val start = Calendar.getInstance().apply {
         set(Calendar.DAY_OF_MONTH, 1)
@@ -169,7 +183,6 @@ private fun currentMonthRangeMillis(): Pair<Long, Long> {
     return start to end
 }
 
-/** 分 -> 元（字符串），保留 2 位小数 */
 private fun centToYuanText(cent: Long): String {
     val abs = kotlin.math.abs(cent)
     val yuan = abs / 100
@@ -177,13 +190,6 @@ private fun centToYuanText(cent: Long): String {
     return "$yuan.${fen.toString().padStart(2, '0')}"
 }
 
-private data class SpendingAnalysis(
-    val title: String,
-    val detail: String,
-    val suggestions: List<String>
-)
-
-/** Top1 分类占本月支出的比例（0~1），没有数据返回 null */
 private fun topCategoryShare(catAgg: List<CategoryAggRow>, totalExpenseCent: Long): Double? {
     if (totalExpenseCent <= 0) return null
     val top = catAgg.maxOfOrNull { it.totalCent } ?: return null
@@ -195,64 +201,69 @@ private fun analyzeSpendingLocal(
     monthIncomeCent: Long,
     budgetCent: Long?,
     avg3MonthExpenseCent: Long?,
-    topCategoryShare: Double?
+    topCategoryShare: Double?,
+    warnHigh: Float,
+    warnLow: Float,
+    topShareWarn: Float
 ): SpendingAnalysis {
-    val title: String
     val basis = mutableListOf<String>()
     val suggestions = mutableListOf<String>()
+    val title: String
 
     if (budgetCent != null && budgetCent > 0) {
         val r = monthExpenseCent.toDouble() / budgetCent.toDouble()
+        val pct = (r * 100).roundToInt()
         when {
             r >= 1.0 -> {
                 title = "本月花费偏高（超预算）"
-                basis += "支出已超过预算（使用 ${(r * 100).toInt()}%）"
-                suggestions += "优先减少非必要消费（餐饮/娱乐/购物）"
-                suggestions += "把Top分类作为第一优化目标"
-                suggestions += "必要时调整预算更贴近实际"
+                basis += "支出已超过预算（使用 ${pct}%）"
+                suggestions += "优先减少非必要消费"
+                suggestions += "从Top分类先优化"
+                suggestions += "必要时调整预算"
             }
-            r >= 0.85 -> {
+            r >= warnHigh.toDouble() -> {
                 title = "本月花费偏高（接近超预算）"
-                basis += "预算使用接近上限（使用 ${(r * 100).toInt()}%）"
-                suggestions += "剩余天数控制可变支出"
+                basis += "预算使用接近上限（使用 ${pct}%）"
+                suggestions += "控制剩余天数的可变支出"
                 suggestions += "避免冲动购物"
-                suggestions += "关注Top分类是否异常偏高"
+                suggestions += "关注Top分类是否异常"
             }
-            r <= 0.40 -> {
+            r <= warnLow.toDouble() -> {
                 title = "本月花费偏低（明显低于预算）"
-                basis += "预算使用偏低（使用 ${(r * 100).toInt()}%）"
-                suggestions += "检查是否有漏记（现金/小额）"
+                basis += "预算使用偏低（使用 ${pct}%）"
+                suggestions += "检查是否漏记（现金/小额）"
                 suggestions += "如果在攒钱，本月很好"
                 suggestions += "预算可调得更贴合实际"
             }
             else -> {
                 title = "本月花费正常（预算范围内）"
-                basis += "预算使用合理（使用 ${(r * 100).toInt()}%）"
+                basis += "预算使用合理（使用 ${pct}%）"
                 suggestions += "保持记账习惯"
-                suggestions += "关注Top分类的结构变化"
                 suggestions += "大额消费记备注更利于回顾"
+                suggestions += "关注Top分类结构变化"
             }
         }
     } else if (avg3MonthExpenseCent != null && avg3MonthExpenseCent > 0) {
         val r = monthExpenseCent.toDouble() / avg3MonthExpenseCent.toDouble()
+        val pct = (r * 100).roundToInt()
         when {
             r >= 1.25 -> {
                 title = "本月花费偏高（高于近3月平均）"
-                basis += "本月支出约为近3月均值的 ${(r * 100).toInt()}%"
+                basis += "本月支出约为近3月均值的 ${pct}%"
                 suggestions += "检查是否有一次性大额支出"
                 suggestions += "从Top分类先压一压"
-                suggestions += "建议设置预算，预警更明确"
+                suggestions += "建议设置预算"
             }
             r <= 0.75 -> {
                 title = "本月花费偏低（低于近3月平均）"
-                basis += "本月支出约为近3月均值的 ${(r * 100).toInt()}%"
+                basis += "本月支出约为近3月均值的 ${pct}%"
                 suggestions += "确认是否漏记"
                 suggestions += "如果在控支出，本月不错"
-                suggestions += "建议设置预算，洞察更准"
+                suggestions += "建议设置预算"
             }
             else -> {
                 title = "本月花费正常（接近近3月平均）"
-                basis += "与近3月平均接近"
+                basis += "与近3月平均接近（约 ${pct}%）"
                 suggestions += "继续保持规律记账"
                 suggestions += "建议设置预算"
                 suggestions += "关注Top分类占比变化"
@@ -272,12 +283,10 @@ private fun analyzeSpendingLocal(
     }
 
     if (topCategoryShare != null) {
-        val p = (topCategoryShare * 100).toInt()
-        if (p >= 60) {
+        val p = (topCategoryShare * 100).roundToInt()
+        if (topCategoryShare >= topShareWarn.toDouble()) {
             basis += "Top分类占比过高（约 ${p}%）"
             suggestions += "Top分类占比过高，建议设上限"
-        } else if (p >= 45) {
-            basis += "Top分类占比偏高（约 ${p}%）"
         }
     }
 
@@ -286,6 +295,7 @@ private fun analyzeSpendingLocal(
         if (budgetCent != null && budgetCent > 0) append(" 预算 ¥${centToYuanText(budgetCent)}。")
         append("\n依据：")
         append(basis.joinToString("；"))
+        append("\n规则：偏高≥${(warnHigh * 100).roundToInt()}%  偏低≤${(warnLow * 100).roundToInt()}%  Top≥${(topShareWarn * 100).roundToInt()}%")
     }
 
     return SpendingAnalysis(
@@ -295,7 +305,6 @@ private fun analyzeSpendingLocal(
     )
 }
 
-/** 最近 3 个月平均支出（分）；取每月支出 Flow 的 firstOrNull() */
 @Composable
 private fun rememberAvgExpenseLast3Months(db: HaoJizhangDatabase): State<Long?> {
     return produceState<Long?>(initialValue = null, db) {
