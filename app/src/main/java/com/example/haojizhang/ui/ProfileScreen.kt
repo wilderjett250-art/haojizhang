@@ -11,15 +11,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.example.haojizhang.data.local.db.DbProvider
 import com.example.haojizhang.data.local.entity.BudgetEntity
-import com.example.haojizhang.data.util.BackupJson
-import com.example.haojizhang.data.util.BackupPayload
 import com.example.haojizhang.data.util.DateUtils
 import com.example.haojizhang.data.util.Prefs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.BufferedReader
-import java.io.InputStreamReader
 import java.math.BigDecimal
 import java.math.RoundingMode
 
@@ -29,11 +25,11 @@ fun ProfileScreen() {
     val db = remember { DbProvider.get(ctx) }
     val scope = rememberCoroutineScope()
 
-    val yearMonth = remember { DateUtils.currentYearMonth() }
-    val budget by db.budgetDao().observeByMonth(yearMonth).collectAsState(initial = null)
-
     val snackbarHostState = remember { SnackbarHostState() }
     fun snack(msg: String) { scope.launch { snackbarHostState.showSnackbar(msg) } }
+
+    val yearMonth = remember { DateUtils.currentYearMonth() }
+    val budget by db.budgetDao().observeByMonth(yearMonth).collectAsState(initial = null)
 
     // ====== 预算 Dialog ======
     var showBudgetDialog by remember { mutableStateOf(false) }
@@ -42,9 +38,9 @@ fun ProfileScreen() {
 
     // ====== 规则 Dialog ======
     var showRuleDialog by remember { mutableStateOf(false) }
-    var inputHigh by remember { mutableStateOf("") }
-    var inputLow by remember { mutableStateOf("") }
-    var inputTop by remember { mutableStateOf("") }
+    var inputHigh by remember { mutableStateOf("") } // 85
+    var inputLow by remember { mutableStateOf("") }  // 40
+    var inputTop by remember { mutableStateOf("") }  // 60
     var ruleErr by remember { mutableStateOf<String?>(null) }
 
     // ====== PIN Dialog ======
@@ -52,72 +48,30 @@ fun ProfileScreen() {
     var inputPin by remember { mutableStateOf("") }
     var pinErr by remember { mutableStateOf<String?>(null) }
 
-    // ====== 导出 ======
-    val exportLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("application/json")
+    // ====== 导出 CSV ======
+    val exportCsvLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/csv")
     ) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
             runCatching {
-                val payload = withContext(Dispatchers.IO) {
-                    BackupPayload(
-                        categories = db.categoryDao().getAllForExport(),
-                        accounts = db.accountDao().getAllForExport(),
-                        budgets = db.budgetDao().getAllForExport(),
-                        bills = db.billDao().getAllForExport()
-                    )
+                val rows = withContext(Dispatchers.IO) {
+                    // 需要你在 BillDao 增加 getAllForCsv()
+                    db.billDao().getAllForCsv()
                 }
-                val json = BackupJson.encode(payload)
+                val csv = buildCsv(rows)
+
                 withContext(Dispatchers.IO) {
                     ctx.contentResolver.openOutputStream(uri, "wt")!!.use { os ->
-                        os.write(json.toByteArray(Charsets.UTF_8))
+                        // ✅ Excel 识别中文更稳：写入 UTF-8 BOM
+                        os.write(byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte()))
+                        os.write(csv.toByteArray(Charsets.UTF_8))
                     }
                 }
             }.onSuccess {
-                snack("导出成功")
+                snack("CSV 导出成功（电脑用 Excel 可直接打开）")
             }.onFailure {
-                snack("导出失败：${it.message}")
-            }
-        }
-    }
-
-    // ====== 导入 ======
-    val importLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri: Uri? ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        scope.launch {
-            runCatching {
-                val text = withContext(Dispatchers.IO) {
-                    ctx.contentResolver.openInputStream(uri)!!.use { ins ->
-                        BufferedReader(InputStreamReader(ins, Charsets.UTF_8)).readText()
-                    }
-                }
-                val payload = BackupJson.decode(text)
-
-                withContext(Dispatchers.IO) {
-                    db.runInTransaction {
-                        // 用非 suspend 方式：事务内部不直接调用 suspend
-                        // 所以我们这里不用 DAO 的 suspend deleteAll，而是把清空放到事务外更规范
-                    }
-                }
-
-                // ✅ 更简单安全：事务外用协程清空 + 导入（仍然保证顺序）
-                withContext(Dispatchers.IO) {
-                    db.billDao().deleteAll()
-                    db.categoryDao().deleteAll()
-                    db.accountDao().deleteAll()
-                    db.budgetDao().deleteAll()
-
-                    db.categoryDao().upsertAll(payload.categories)
-                    db.accountDao().upsertAll(payload.accounts)
-                    payload.budgets.forEach { db.budgetDao().upsert(it) }
-                    db.billDao().insertAllForImport(payload.bills)
-                }
-            }.onSuccess {
-                snack("导入成功（已覆盖本地数据）")
-            }.onFailure {
-                snack("导入失败：${it.message}")
+                snack("CSV 导出失败：${it.message}")
             }
         }
     }
@@ -126,7 +80,10 @@ fun ProfileScreen() {
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { inner ->
         Column(
-            Modifier.fillMaxSize().padding(inner).padding(16.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(inner)
+                .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text("个人中心", style = MaterialTheme.typography.titleLarge)
@@ -140,12 +97,14 @@ fun ProfileScreen() {
                 }
             }
 
+            // ===== 预算与规则 =====
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
                     Text("预算（$yearMonth）", style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(8.dp))
                     Text(if (budget == null) "未设置" else "当前：¥${centToYuanText(budget!!.limitCent)}")
                     Spacer(Modifier.height(10.dp))
+
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Button(onClick = {
                             inputBudget = budget?.let { centToYuanText(it.limitCent) } ?: ""
@@ -164,19 +123,23 @@ fun ProfileScreen() {
                 }
             }
 
+            // ===== 数据导出：CSV =====
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
-                    Text("数据备份", style = MaterialTheme.typography.titleMedium)
+                    Text("数据导出", style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(10.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Button(onClick = { exportLauncher.launch("haojizhang_backup.json") }) { Text("导出") }
-                        OutlinedButton(onClick = { importLauncher.launch(arrayOf("application/json", "text/*")) }) { Text("导入") }
-                    }
+                    OutlinedButton(
+                        onClick = { exportCsvLauncher.launch("haojizhang_bills.csv") },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("导出账单 CSV（Excel）") }
+
                     Spacer(Modifier.height(6.dp))
-                    Text("导入会覆盖本地数据（稳定策略）", style = MaterialTheme.typography.bodySmall)
+                    Text("说明：CSV 可直接用 Excel 打开；包含分类名、账户名、备注、时间戳。",
+                        style = MaterialTheme.typography.bodySmall)
                 }
             }
 
+            // ===== 登录锁（本地 PIN） =====
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
                     Text("登录锁（本地 PIN）", style = MaterialTheme.typography.titleMedium)
@@ -184,6 +147,7 @@ fun ProfileScreen() {
                     val enabled = Prefs.isPinEnabled(ctx) && Prefs.getPin(ctx).isNotBlank()
                     Text(if (enabled) "已启用" else "未启用")
                     Spacer(Modifier.height(10.dp))
+
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Button(onClick = {
                             inputPin = ""
@@ -217,7 +181,10 @@ fun ProfileScreen() {
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
-                    budgetErr?.let { Spacer(Modifier.height(8.dp)); Text(it, color = MaterialTheme.colorScheme.error) }
+                    budgetErr?.let {
+                        Spacer(Modifier.height(8.dp))
+                        Text(it, color = MaterialTheme.colorScheme.error)
+                    }
                 }
             },
             confirmButton = {
@@ -313,7 +280,10 @@ fun ProfileScreen() {
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
-                    pinErr?.let { Spacer(Modifier.height(8.dp)); Text(it, color = MaterialTheme.colorScheme.error) }
+                    pinErr?.let {
+                        Spacer(Modifier.height(8.dp))
+                        Text(it, color = MaterialTheme.colorScheme.error)
+                    }
                 }
             },
             confirmButton = {
@@ -349,4 +319,31 @@ private fun parseYuanToCent(text: String): Long? {
     } catch (_: Exception) {
         null
     }
+}
+
+/**
+ * ✅ rows 的类型是 BillDao 里新增的 BillCsvRow
+ * 你需要按我下面提醒把 BillCsvRow + getAllForCsv() 加到 BillDao.kt
+ */
+private fun buildCsv(rows: List<com.example.haojizhang.data.local.dao.BillCsvRow>): String {
+    fun esc(s: String?): String {
+        val t = (s ?: "").replace("\"", "\"\"")
+        return "\"$t\""
+    }
+
+    val sb = StringBuilder()
+    sb.append("id,amount_yuan,type,category,account,note,occurredAt\n")
+
+    rows.forEach { r ->
+        val amountYuan = r.amountCent / 100.0
+        val typeText = if (r.type == 1) "收入" else "支出"
+        sb.append(r.id).append(",")
+        sb.append(amountYuan).append(",")
+        sb.append(esc(typeText)).append(",")
+        sb.append(esc(r.categoryName)).append(",")
+        sb.append(esc(r.accountName)).append(",")
+        sb.append(esc(r.note)).append(",")
+        sb.append(r.occurredAt).append("\n")
+    }
+    return sb.toString()
 }

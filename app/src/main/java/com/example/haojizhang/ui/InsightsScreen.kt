@@ -1,4 +1,6 @@
 package com.example.haojizhang.ui
+import com.example.haojizhang.ui.charts.CategoryPieChart
+import com.example.haojizhang.ui.charts.PieSlice
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -125,6 +127,48 @@ fun InsightsScreen() {
                 }
             }
         }
+
+        item {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("本月支出分类占比（饼图）", style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.height(10.dp))
+
+                    val total = expenseCent
+                    val slices = remember(catAgg, categories, total) {
+                        if (total <= 0L) emptyList()
+                        else {
+                            // 取前 6 个，剩下合并为“其他”
+                            val nameMap = categories.associateBy({ it.id }, { it.name })
+                            val sorted = catAgg.sortedByDescending { it.totalCent }
+                            val main = sorted.take(6)
+                            val otherSum = sorted.drop(6).sumOf { it.totalCent }
+
+                            val res = mutableListOf<PieSlice>()
+                            main.forEach {
+                                val label = nameMap[it.keyId] ?: "未知"
+                                res += PieSlice(label = label, value = it.totalCent.toFloat())
+                            }
+                            if (otherSum > 0) res += PieSlice(label = "其他", value = otherSum.toFloat())
+                            res
+                        }
+                    }
+
+                    if (slices.isEmpty()) {
+                        Text("本月暂无支出，先记一笔支出再显示饼图。")
+                    } else {
+                        CategoryPieChart(
+                            slices = slices,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(280.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+
 
         item {
             Card(Modifier.fillMaxWidth()) {
