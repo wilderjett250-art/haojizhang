@@ -4,28 +4,27 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
-import androidx.room.Update
 import com.example.haojizhang.data.local.entity.AccountEntity
 import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface AccountDao {
 
-    @Query("SELECT * FROM accounts WHERE isArchived = 0 ORDER BY sortOrder ASC, id ASC")
-    fun observeActive(): Flow<List<AccountEntity>>
-
-    @Query("SELECT * FROM accounts WHERE id = :id LIMIT 1")
-    suspend fun getById(id: Long): AccountEntity?
-
-    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(entity: AccountEntity): Long
 
-    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(list: List<AccountEntity>): List<Long>
 
-    @Update
-    suspend fun update(entity: AccountEntity)
-
-    @Query("SELECT COUNT(*) FROM accounts")
+    @Query("SELECT COUNT(*) FROM account")
     suspend fun countAll(): Int
+
+    @Query(
+        """
+        SELECT * FROM account
+        WHERE isActive = 1
+        ORDER BY sortOrder ASC, id ASC
+        """
+    )
+    fun observeActive(): Flow<List<AccountEntity>>
 }

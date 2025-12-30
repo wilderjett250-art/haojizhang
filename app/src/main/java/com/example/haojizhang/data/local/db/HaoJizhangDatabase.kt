@@ -14,9 +14,16 @@ import com.example.haojizhang.data.local.entity.BudgetEntity
 import com.example.haojizhang.data.local.entity.CategoryEntity
 
 @Database(
-    entities = [BillEntity::class, CategoryEntity::class, AccountEntity::class, BudgetEntity::class],
-    version = 1,
-    exportSchema = false
+    entities = [
+        BillEntity::class,
+        CategoryEntity::class,
+        AccountEntity::class,
+        BudgetEntity::class
+    ],
+    // 由于这次把 CategoryEntity/AccountEntity 的 boolean 字段显式声明了列名，
+    // 需要 bump version，防止你本地旧库字段名不一致导致各种奇怪报错。
+    version = 3,
+    exportSchema = true
 )
 abstract class HaoJizhangDatabase : RoomDatabase() {
 
@@ -30,11 +37,15 @@ abstract class HaoJizhangDatabase : RoomDatabase() {
 
         fun getInstance(context: Context): HaoJizhangDatabase {
             return INSTANCE ?: synchronized(this) {
-                INSTANCE ?: Room.databaseBuilder(
+                val db = Room.databaseBuilder(
                     context.applicationContext,
                     HaoJizhangDatabase::class.java,
                     "haojizhang.db"
-                ).build().also { INSTANCE = it }
+                )
+                    .fallbackToDestructiveMigration()
+                    .build()
+                INSTANCE = db
+                db
             }
         }
     }
