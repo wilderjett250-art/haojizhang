@@ -1,17 +1,18 @@
 package com.example.haojizhang.ui
-import androidx.navigation.NavHostController
 
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Home
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavHostController
 import androidx.navigation.compose.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -27,9 +28,7 @@ fun AppRoot() {
     )
 
     Scaffold(
-        topBar = {
-            CenterAlignedTopAppBar(title = { Text("豪记账") })
-        },
+        topBar = { CenterAlignedTopAppBar(title = { Text("豪记账") }) },
         floatingActionButton = {
             FloatingActionButton(onClick = { navController.navigate("add") }) {
                 Icon(Icons.Filled.Add, contentDescription = "新增账单")
@@ -66,7 +65,7 @@ fun AppRoot() {
             composable("bills") { BillsScreen() }
             composable("insights") { InsightsScreen() }
             composable("profile") { ProfileScreen() }
-            composable("add") { AddBillScreen() }
+            composable("add") { AddBillScreen(navController) }
         }
     }
 }
@@ -74,7 +73,7 @@ fun AppRoot() {
 data class BottomTab(
     val route: String,
     val label: String,
-    val icon: androidx.compose.ui.graphics.vector.ImageVector
+    val icon: ImageVector
 )
 
 @Composable
