@@ -65,6 +65,12 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation("com.github.PhilJay:MPAndroidChart:v3.1.0")
 
+    // === OCR / 汇率：网络请求（Retrofit + Gson + OkHttp）===
+    implementation("com.squareup.retrofit2:retrofit:2.11.0")
+    implementation("com.squareup.retrofit2:converter-gson:2.11.0")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
+
     implementation(libs.androidx.ui)
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)

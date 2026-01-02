@@ -9,6 +9,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.navigation.NavHostController // NEW
 import com.example.haojizhang.data.local.db.DbProvider
 import com.example.haojizhang.data.local.entity.BudgetEntity
 import com.example.haojizhang.data.util.DateUtils
@@ -20,7 +21,7 @@ import java.math.BigDecimal
 import java.math.RoundingMode
 
 @Composable
-fun ProfileScreen() {
+fun ProfileScreen(navController: NavHostController) { // NEW：接收 navController，其他逻辑不动
     val ctx = LocalContext.current
     val db = remember { DbProvider.get(ctx) }
     val scope = rememberCoroutineScope()
@@ -134,8 +135,28 @@ fun ProfileScreen() {
                     ) { Text("导出账单 CSV（Excel）") }
 
                     Spacer(Modifier.height(6.dp))
-                    Text("说明：CSV 可直接用 Excel 打开；包含分类名、账户名、备注、时间戳。",
-                        style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        "说明：CSV 可直接用 Excel 打开；包含分类名、账户名、备注、时间戳。",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+
+            // ===== NEW：工具 / 汇率 =====
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("工具", style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.height(10.dp))
+                    OutlinedButton(
+                        onClick = { navController.navigate("fx") },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("汇率转换（实时）") }
+
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "说明：使用 Frankfurter API 获取实时汇率。",
+                        style = MaterialTheme.typography.bodySmall
+                    )
                 }
             }
 

@@ -11,10 +11,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.*
-import androidx.compose.ui.platform.LocalContext
 import com.example.haojizhang.data.util.Prefs
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -89,8 +89,14 @@ fun AppRoot() {
             composable("home") { HomeScreen() }
             composable("bills") { BillsScreen() }
             composable("insights") { InsightsScreen() }
-            composable("profile") { ProfileScreen() }
+
+            // ✅ 改动点1：ProfileScreen 传 navController（用于跳工具页）
+            composable("profile") { ProfileScreen(navController) }
+
             composable("add") { AddBillScreen(navController) }
+
+            // ✅ 改动点2：新增工具/汇率页 route
+            composable("fx") { FxScreen() }
         }
     }
 }
